@@ -98,7 +98,6 @@ def worker(queue_worker, queue_writer):
 
 
 def writer(queue):
-    count_writer = 0
     while True:
         csv_string, group_id = queue.get()
         now = datetime.datetime.now(TIMEZONE)
@@ -109,9 +108,6 @@ def writer(queue):
             os.makedirs(path)
         with open(path + '/%d.csv' % group_id, 'a') as csv_file:
             csv_file.write(csv_string)
-        count_writer += 1
-        if count_writer % 33 == 0:
-            LOG.debug('Writer done')
 
 
 def main():
