@@ -5,7 +5,9 @@ import logging
 import os
 import random
 import re
+import shutil
 import signal
+import subprocess
 import sys
 import time
 import traceback
@@ -14,6 +16,7 @@ from threading import Thread
 
 import pytz
 import requests
+from bypy import ByPy
 
 LOG = logging.getLogger(__name__)
 LOG.setLevel(logging.DEBUG)
@@ -29,6 +32,7 @@ TIME_AM_OPEN = datetime.time(9, 29, 30)
 TIME_AM_CLOSE = datetime.time(11, 30, 5)
 TIME_PM_OPEN = datetime.time(12, 59, 55)
 TIME_PM_CLOSE = datetime.time(15, 0, 5)
+TIME_UPLOAD = datetime.time(23, 0, 0)
 TIMEZONE = pytz.timezone('Asia/Shanghai')
 
 STOCK_INFO_URL = 'http://file.tushare.org/all.csv'
@@ -110,6 +114,32 @@ def writer(queue):
             csv_file.write(csv_string)
 
 
+def compress_and_upload(date):
+    date_string = '%04d%02d%02d' % (date.year, date.month, date.day)
+    folder_path = 'data/' + date_string
+    folder_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), folder_path)
+    if not os.path.exists(folder_path):
+        LOG.error('%s does not exist', folder_path)
+        return
+    archive_path = folder_path + '.7z'
+    if os.path.exists(archive_path):
+        LOG.warning('%s already exists, it is removed first', archive_path)
+        os.remove(archive_path)
+    LOG.info('Compress and remove %s', folder_path)
+    ret = subprocess.run(['7za', 'a', archive_path, folder_path]).returncode
+    if ret != 0:
+        LOG.error('Compressing %s returns nonzero code %d', folder_path, ret)
+        return
+    shutil.rmtree(folder_path, ignore_errors=True)
+    LOG.info('Upload and remove %s', archive_path)
+    bp = ByPy()
+    ret = bp.upload(archive_path, 'dshare/data')
+    if ret != 0 and ret != 60:
+        LOG.error('Bypy upload returns nonzero code %d', ret)
+        return
+    os.remove(archive_path)
+
+
 def main():
     queue_writer = Queue()
     queue_worker = JoinableQueue()
@@ -135,16 +165,22 @@ def main():
     stock_codes = []
     last_empty = -1
     last_day_of_week = -1
+    last_upload = -1
 
     while True:
         now = datetime.datetime.now(TIMEZONE)
         day_of_week = now.weekday()
         time_of_day = now.time()
         # updating stock info daily
-        if day_of_week != last_day_of_week:
+        if last_day_of_week != day_of_week:
             last_day_of_week = day_of_week
             LOG.info('Downloading stock info')
             stock_codes = get_stock_codes()
+        if 0 <= day_of_week <= 4 and last_upload != day_of_week and time_of_day >= TIME_UPLOAD:
+            last_upload = day_of_week
+            thread = Thread(target=compress_and_upload, args=(now,))
+            thread.daemon = True
+            thread.start()
         if not (0 <= day_of_week <= 4
                 and (TIME_AM_OPEN <= time_of_day <= TIME_AM_CLOSE
                      or TIME_PM_OPEN <= time_of_day <= TIME_PM_CLOSE)):
