@@ -126,7 +126,7 @@ def compress_and_upload(date):
         LOG.warning('%s already exists, it is removed first', archive_path)
         os.remove(archive_path)
     LOG.info('Compress and remove %s', folder_path)
-    ret = subprocess.run(['7za', 'a', archive_path, folder_path]).returncode
+    ret = subprocess.run(['7za', 'a', '-mmt=off', archive_path, folder_path]).returncode
     if ret != 0:
         LOG.error('Compressing %s returns nonzero code %d', folder_path, ret)
         return
